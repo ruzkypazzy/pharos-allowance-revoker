@@ -1,0 +1,24 @@
+[profile.default]
+src = "."
+out = "out"
+libs = ["lib"]
+solc_version = 0.8.20
+optimizer = true
+optimizer_runs = 200
+via_ir = false
+
+[rpc_endpoints]
+pharos_mainnet = "https://rpc.pharos.xyz"
+pharos_testnet = "https://atlantic.dplabs-internal.com"
+
+[etherscan]
+pharos_mainnet = { key = "${PHAROSSCAN_API_KEY}" }
+
+[profile.ci]
+verify = true
+chain_id = 1672
+
+[profile.local]
+src = "src"
+out = "out-foundry"
+libs = ["lib", "node_modules"]
