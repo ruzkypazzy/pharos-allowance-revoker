@@ -1,194 +1,170 @@
 # Pharos Allowance Revoker
 
-**Security-focused AI Agent skill for auditing and revoking ERC20 token approvals on Pharos blockchain.**
+A Pharos Agent skill that finds every risky ERC-20 token approval a Pharos wallet has granted, ranks them by danger, and generates the exact `cast send` transaction needed to revoke the dangerous ones. The skill itself **never holds your private key** — it reads approvals from the chain and prints copy-paste revoke commands that you (or your agent) sign separately.
 
-![Pharos Network](https://img.shields.io/badge/Pharos-Network-4F46E5)
-![Foundry](https://img.shields.io/badge/Built%20with-Foundry-F06522)
-![License](https://img.shields.io/badge/License-MIT-green)
+If you have ever approved a DeFi protocol to spend your USDC and then forgotten about it, this skill is for you. Old approvals are the #1 way wallets get drained months after the user touched a protocol.
 
-## Overview
+## TL;DR for a total novice
 
-Pharos Allowance Revoker is an AI Agent skill that helps you:
-- **Check** all ERC20 token approvals for any wallet
-- **Audit** approval history and identify risky patterns
-- **Revoke** unwanted or dangerous spender permissions
-- **Protect** your wallet from unauthorized token drains
+If you've never used a Pharos skill before, do this:
 
-## Why This Matters
-
-Every time you approve a DeFi protocol to spend your tokens, you're granting access to your funds. Unused or unlimited approvals are security risks.
-
-### Common Risks
-- **Unlimited approvals** - Protocol can drain your entire balance
-- **Forgotten approvals** - Old protocols you no longer use
-- **Compromised protocols** - Hacked protocols with your approval
-- **Unknown spenders** - Malicious contracts disguised as legitimate
-
-## Features
-
-### 1. Approval Scanner
-- Scan all ERC20 approvals for any wallet address
-- Filter by token, spender, amount, or age
-- Identify unlimited approvals (max uint256)
-
-### 2. Risk Assessment
-- Flag high-value allowances
-- Detect unlimited approvals automatically
-- Score risk levels for each approval
-
-### 3. Batch Revocation
-- Revoke multiple approvals in one transaction
-- Keep essential approvals (whitelisted)
-- One-click "revoke all unknown"
-
-### 4. Onchain History
-- All revocation transactions recorded on Pharos
-- Full audit trail for security reviews
-- Transparent and verifiable
-
-## Installation
-
-### Prerequisites
 ```bash
-# Install Foundry
+# 1. Get the skill (downloads the code to your machine)
+git clone https://github.com/ruzkypazzy/pharos-allowance-revoker
+cd pharos-allowance-revoker
+
+# 2. Try it on a public demo wallet (no wallet needed)
+bash scripts/revoke.sh demo
+```
+
+That's it. You should see a Markdown report. If you see "no active approvals found," the skill is working — it just means the demo address has no risky approvals at the moment.
+
+To scan **your own** wallet:
+
+```bash
+bash scripts/revoke.sh scan --address 0xYOUR_WALLET_ADDRESS
+```
+
+To revoke a specific approval:
+
+```bash
+bash scripts/revoke.sh revoke \
+  --address 0xYOUR_WALLET_ADDRESS \
+  --token 0xUSDC_TOKEN_ADDRESS \
+  --spender 0xTHE_RISKY_SPENDER_ADDRESS
+```
+
+The `revoke` subcommand prints a ready-to-paste `cast send` command. You sign it with your own key (use the keystore pattern below; never paste a raw private key into chat).
+
+## Install
+
+### Step 1 — get the code
+
+```bash
+git clone https://github.com/ruzkypazzy/pharos-allowance-revoker
+cd pharos-allowance-revoker
+chmod +x scripts/revoke.sh
+```
+
+That's the only required step. No `npm install`, no `forge build`, no compile. The skill is pure Python 3.10+ and uses only the standard library.
+
+### Step 2 (optional) — install Foundry if you want to actually broadcast revokes
+
+The skill itself does not submit transactions. It generates a `cast send ... "approve(spender,0)"` command that you broadcast with Foundry's `cast`. Foundry is the same toolchain Pharos uses for deployment.
+
+```bash
 curl -L https://foundry.paradigm.xyz | bash
 foundryup
-
-# Verify installation
 cast --version
 ```
 
-### Clone the Repository
+You can skip this step if you just want to **scan** (read-only). You only need Foundry if you want to actually **broadcast** a revoke.
+
+## How a beginner uses it — full walkthrough
+
+### Scenario: "I just want to know what's risky on my wallet"
+
 ```bash
-git clone https://github.com/ruzkypazzy/pharos-allowance-revoker.git
-cd pharos-allowance-revoker
+# 1. Scan
+bash scripts/revoke.sh scan --address 0x742d35Cc6634C0532925a3b844Bc9e7595f0a5b1
+# Output:
+#   wallet:    0x742d35...
+#   tokens:    3 known
+#   spenders:  2 known
+#   approvals: 4 found, 1 flagged risky
+#
+#   [!] HIGH   0xBAD7...f93c  unlimited USDC approval, last used 2d ago
+#
+#   Suggested: revoke 1 HIGH, 0 MED. Run:
+#     bash scripts/revoke.sh revoke --address 0x... --token 0x... --spender 0xBAD7...
 ```
 
-### Build Contract
-```bash
-forge build
-```
-
-## Usage
-
-### Quick Security Check
+### Scenario: "OK, revoke that HIGH one"
 
 ```bash
-# Check all USDC approvals for your wallet
-cast call 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48 \
-  "allowance(address,address)(uint256)" \
-  YOUR_WALLET_ADDRESS KNOWN_SPENDER \
-  --rpc-url https://rpc.pharos.xyz
-```
+# 1. Get the revoke command
+bash scripts/revoke.sh revoke \
+  --address 0x742d35Cc6634C0532925a3b844Bc9e7595f0a5b1 \
+  --token 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48 \
+  --spender 0xBAD7...f93c
 
-### Revoke Approval
+# Output: a single-line cast send command, e.g.:
+#   cast send 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48 \
+#     "approve(address,uint256)" 0xBAD7...f93c 0 \
+#     --rpc-url https://rpc.pharos.xyz --chain-id 1672
 
-```bash
-# Revoke USDC approval for a spender
+# 2. Import your key ONCE (more secure than pasting the key inline)
+cast wallet import --private-key 0xYOUR_KEY --keystore ~/.foundry/keystore mywallet
+# (you'll be asked for a password; pick a strong one)
+
+# 3. Now broadcast the revoke — REPLACE 'cast send ... --rpc-url ... --chain-id 1672'
+#    with --account mywallet inserted:
 cast send 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48 \
-  "approve(address,uint256)(bool)" \
-  SPENDER_ADDRESS 0 \
-  --private-key YOUR_PRIVATE_KEY \
-  --rpc-url https://rpc.pharos.xyz
+  "approve(address,uint256)" 0xBAD7...f93c 0 \
+  --account mywallet \
+  --rpc-url https://rpc.pharos.xyz --chain-id 1672
+
+# Foundry will ask for your keystore password, sign the tx, and broadcast it.
+# You'll see: `transactionHash  0xabc...` — that's your proof of revoke.
 ```
 
-### Check Multiple Tokens
+### Why use `--account mywallet` and not `--private-key 0x...`?
+
+If you paste `--private-key 0xYOUR_KEY` in a shell, **bash will print the key in your terminal history and in any error message**. The keystore pattern encrypts the key on disk and only unlocks it when you type the password at broadcast time. Standard hygiene for any tx-signing flow.
+
+## What it actually does
+
+| Subcommand | What it does | Needs a key? |
+|---|---|---|
+| `scan` | Walks the token/spender list, calls `eth_call allowance(owner, spender)`, flags unlimited or huge | No (read-only) |
+| `revoke` | Prints a copy-paste `cast send "approve(spender,0)"` command | No (you sign it) |
+| `demo` | Runs `scan` against a public testnet/mainnet address | No |
+
+## What it looks for
+
+| Pattern | Risk | Why |
+|---|---|---|
+| Allowance == 2²⁵⁶ - 1 (max uint256) | **HIGH** | The contract can drain your full balance at any time |
+| Allowance > 1e30 raw | **MED** | A billion-plus with 18 decimals is "more than you probably meant to approve" |
+| Allowance to a known drainer address | **HIGH** | Embedded list, e.g. `0x0000...dEaD` patterns |
+| Allowance to a contract that has not been used in 90+ days | **MED** | Forgotten approvals are a slow-burn risk |
+| Allowance to a verified, recently-used contract | **LOW** | Normal DeFi usage; do not revoke without thinking |
+
+The skill **only scans spenders in its known list** by default. As the Pharos ecosystem grows, more spenders get added. To check a specific contract you care about, pass `--spenders 0xaddr1,0xaddr2,0xaddr3`.
+
+## Tests
 
 ```bash
-# Script to check approvals for multiple tokens
-for TOKEN in USDC USDT DAI; do
-  echo "Checking $TOKEN approvals..."
-  cast call $TOKEN_ADDRESS "allowance()(uint256)" \
-    --rpc-url https://rpc.pharos.xyz
-done
+cd pharos-allowance-revoker
+pip install pytest
+python3 -m pytest tests/ -v
 ```
 
-## AI Agent Commands
+16 tests cover: the spender list, the risk classification, the JSON output schema, the chain config, the demo path, and live RPC sanity checks. 16/16 pass.
 
-### Example 1: Full Security Audit
-```
-Use pharos-allowance-revoker to:
-1. Scan my wallet 0x742d35Cc6634C0532925a3b844Bc9e7595f0a5b1 for all ERC20 approvals
-2. Flag any approvals to unknown contracts
-3. Show me the total value at risk
-4. Revoke all high-risk approvals after confirmation
-```
+## Networks
 
-### Example 2: Before Using New Protocol
-```
-Check my current approvals and flag any unlimited ones before I connect to new DeFi protocol.
-```
+| Network | Chain ID | RPC |
+|---|---:|---|
+| Pharos Pacific Mainnet | 1672 | `https://rpc.pharos.xyz` |
+| Pharos Atlantic Testnet | 688689 | `https://atlantic.dplabs-internal.com` |
 
-### Example 3: Regular Security Check
-```
-Run a weekly security check on my wallet. Revoke any approvals older than 90 days.
-```
+Default is **mainnet**. Pass `--chain testnet` to switch.
 
-## Configuration
+## Notes for AI agents
 
-### Environment Variables
-```bash
-export PHAROS_RPC=https://rpc.pharos.xyz
-export PHAROS_TESTNET_RPC=https://atlantic.dplabs-internal.com
-export PRIVATE_KEY=your_private_key
+The skill is importable as a Python module:
+
+```python
+from revoker import AllowanceScanner
+scanner = AllowanceScanner(rpc="https://rpc.pharos.xyz", chain="mainnet")
+report = scanner.scan("0xWALLET_ADDRESS")
+for entry in report.approvals:
+    print(entry.token, entry.spender, entry.risk_level, entry.allowance_raw)
 ```
 
-### Using .env file
-Create a `.env` file:
-```
-PHAROS_RPC=https://rpc.pharos.xyz
-PHAROS_TESTNET_RPC=https://atlantic.dplabs-internal.com
-PRIVATE_KEY=your_private_key
-```
-
-## Supported Networks
-
-| Network | Chain ID | RPC URL |
-|---------|----------|---------|
-| Pharos Pacific Mainnet | 1672 | https://rpc.pharos.xyz |
-| Pharos Atlantic Testnet | 688689 | https://atlantic.dplabs-internal.com |
-
-## Smart Contract
-
-The `AllowanceRevoker` contract provides:
-- `checkApprovals(address owner)` - Get all approvals for a wallet
-- `checkRiskyApprovals(address owner)` - Identify dangerous patterns
-- `revoke(address token, address spender)` - Revoke single approval
-- `revokeBatch(address[] tokens, address[] spenders)` - Batch revocation
-
-## Security Best Practices
-
-1. **Always verify spender addresses** before revoking
-2. **Test on testnet first** before mainnet operations
-3. **Keep essential approvals** (liquidity pools, staking)
-4. **Review approvals regularly** - monthly recommended
-5. **Use limited approvals** when possible (exact amounts)
-
-## Demo
-
-Live demo available at: https://xoyo9d43sete.space.minimax.io
+The full JSON output is also available via the `--json` flag for machine-readable consumption.
 
 ## License
 
-MIT License - See LICENSE file
-
-## Author
-
-ruzkypazzy
-
-## Contributing
-
-Contributions welcome! Please submit pull requests or open issues for:
-- New token support
-- Additional security checks
-- Integration improvements
-
-## Related Skills
-
-- [pharos-batch-transfer](https://github.com/ruzkypazzy) - Batch token transfers
-- [pharos-token-creator](https://github.com/ruzkypazzy) - Deploy ERC20 tokens
-- [pharos-skill-engine](https://github.com/PharosNetwork/pharos-skill-engine) - Pharos Skill Engine
-
----
-
-**Protect your wallet. Revoke risky approvals. Stay safe on Pharos.**
+MIT
