@@ -69,6 +69,68 @@ chmod +x scripts/*.sh
 ```
 
 That's it. No `pip install`, no `npm install`, no `forge build`, no compile. The skill is one or more bash scripts that use `cast` (from Foundry) for every RPC read. The `assets/networks.json` file already knows the Pharos Pacific Mainnet and Atlantic Testnet endpoints.
+## Quick test (try it in 30 seconds)
+
+After the 3-step install above, run the demo mode (no private key, no RPC, no setup):
+
+```bash
+bash scripts/revoke.sh demo
+```
+
+You should see a printed report. The demo uses synthetic data, so it works offline.
+
+To run a real check on a Pharos transaction, wallet, or token, replace the placeholder:
+
+```bash
+bash scripts/revoke.sh scan --address 0xYOUR_WALLET
+```
+
+## Use in an AI agent (Claude Code / Codex / OpenClaw / Pharos Agent Center)
+
+The skill ships with a `SKILL.md` that AI agents auto-load. Once installed in your agent, just ask in natural language — the agent will read `SKILL.md` and run the bash script for you.
+
+```text
+"What ERC-20 approvals on my wallet 0xabc... are risky?"
+```
+
+The agent will run `bash scripts/revoke.sh demo` (or the live command with the address you gave) and read the result back to you.
+
+### Install in your agent
+
+**Option A — Pharos Agent Center** (one-line install):
+
+```bash
+# from inside any agent that has the Pharos Agent Center CLI
+pharos-skill install https://github.com/ruzkypazzy/pharos-allowance-revoker
+```
+
+**Option B — OpenClaw / Claude Code / Codex** (one-line via npm):
+
+```bash
+npx skills add https://github.com/ruzkypazzy/pharos-allowance-revoker
+```
+
+**Option C — Manual install** (drop into your agent's skills directory):
+
+```bash
+# Clone the skill
+git clone https://github.com/ruzkypazzy/pharos-allowance-revoker
+cd pharos-allowance-revoker
+
+# Claude Code: copy to ~/.claude/skills/
+mkdir -p ~/.claude/skills/pharos-allowance-revoker
+cp -r . ~/.claude/skills/pharos-allowance-revoker/
+
+# Codex: copy to ~/.codex/skills/
+mkdir -p ~/.codex/skills/pharos-allowance-revoker
+cp -r . ~/.codex/skills/pharos-allowance-revoker/
+
+# OpenClaw: copy to ~/.openclaw/skills/
+mkdir -p ~/.openclaw/skills/pharos-allowance-revoker
+cp -r . ~/.openclaw/skills/pharos-allowance-revoker/
+
+# Then restart the agent — the skill will be auto-loaded.
+```
 ## How a beginner uses it — full walkthrough
 
 ### Scenario: "I just want to know what's risky on my wallet"
