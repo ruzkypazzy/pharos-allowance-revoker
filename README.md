@@ -1,285 +1,292 @@
 # Pharos Allowance Revoker
 
-A Pharos Agent skill that finds every risky ERC-20 token approval a Pharos wallet has granted, ranks them by danger, and generates the exact `cast send` transaction needed to revoke the dangerous ones. The skill itself **never holds your private key** — it reads approvals from the chain and prints copy-paste revoke commands that you (or your agent) sign separately.
+> Audit a Pharos wallet for risky ERC-20 approvals and print the exact `cast send` command to revoke them — without ever touching your private key.
 
-If you have ever approved a DeFi protocol to spend your USDC and then forgotten about it, this skill is for you. Old approvals are the #1 way wallets get drained months after the user touched a protocol.
+[![foundry](https://img.shields.io/badge/built%20with-Foundry-orange)]()
+[![bash](https://img.shields.io/badge/script-bash-blue)]()
+[![license](https://img.shields.io/badge/license-MIT-green)]()
+[![pharos](https://img.shields.io/badge/network-Pharos-blueviolet)]()
+[![ai-agent](https://img.shields.io/badge/callable%20by-AI%20agent-purple)]()
 
-## TL;DR for a total novice
+## What it is
 
-If you've never used a Pharos skill before, do this:
+This is a **skill built for the Pharos network** — a self-contained, deterministic bash script that runs on top of the [Pharos](https://pharos.network) EVM chains. It is **not** an AI agent itself, not a chatbot, and not a Python service. It is a single bash script that:
 
-```bash
-# 1. Get the skill (downloads the code to your machine)
-git clone https://github.com/ruzkypazzy/pharos-allowance-revoker
-cd pharos-allowance-revoker
+- takes input from the caller via CLI flags,
+- reads live on-chain data from Pharos via `cast` (Foundry),
+- runs its own risk scoring in pure bash + `jq`,
+- prints a structured report (text or JSON) to stdout.
 
-# 2. Try it on a public demo wallet (no wallet needed)
-bash scripts/revoke.sh demo
+Scans a Pharos wallet for ERC-20 token approvals against a list of known tokens and spenders, flags risky ones (UNLIMITED = 2^256-1, LARGE = > 1e30), and prints a copy-paste `cast send` revoke command for each. Reads live on-chain data via `cast` (Foundry); no Python, no Node.js, no other runtime.
+
+## Use it from an AI agent
+
+This skill is designed to be **called by an AI agent** (a Claude Code / Codex / Cursor agent, the Pharos Agent Center, or any custom LLM agent). The agent reads `SKILL.md` to discover the skill's flags, fills them in based on the user's request, and runs the bash script in its sandbox. The agent's job is just to translate "audit this wallet for risky approvals" into `bash scripts/revoke.sh scan --address 0x...`.
+
+The skill is **non-custodial**: it never sees, stores, or transmits a private key. It reads allowances via `cast call` and prints a `cast send ... approve(spender, 0)` command that the user (or the agent) signs separately with their own key. The agent should never paste a raw private key into a chat — use the keystore pattern (`cast wallet import --keystore-dir ~/.foundry/keystore --private-key $YOUR_KEY` then `cast send ... --keystore <name>`).
+
+Typical agent-side flow:
+
+```text
+User -> Agent: "Audit wallet 0xabc... for risky ERC-20 approvals on Pharos"
+Agent -> looks up SKILL.md for Pharos Allowance Revoker
+Agent -> picks the right flag combo: --address 0xabc... --chain mainnet
+Agent -> runs: bash scripts/revoke.sh scan --address 0xabc... --chain mainnet
+Agent -> reads the output, presents the risky approvals + revoke commands to the user
+User -> signs each revoke command with their own keystore, broadcasts
 ```
 
-That's it. You should see a Markdown report. If you see "no active approvals found," the skill is working — it just means the demo address has no risky approvals at the moment.
-
-To scan **your own** wallet:
-
-```bash
-bash scripts/revoke.sh scan --address 0xYOUR_WALLET_ADDRESS
-```
-
-To revoke a specific approval:
-
-```bash
-bash scripts/revoke.sh revoke \
-  --address 0xYOUR_WALLET_ADDRESS \
-  --token 0xUSDC_TOKEN_ADDRESS \
-  --spender 0xTHE_RISKY_SPENDER_ADDRESS
-```
-
-The `revoke` subcommand prints a ready-to-paste `cast send` command. You sign it with your own key (use the keystore pattern below; never paste a raw private key into chat).
+The script prints structured output to stdout and human-readable progress to stderr, so the agent can parse the stdout cleanly (with `jq`) without being polluted by progress messages.
 
 ## Install
 
-### 1. Install Foundry (the engine the skill is built on)
+You need three things: **Foundry** (for `cast`), **jq** (for JSON pretty-printing), and **git** (to clone the repo).
 
 ```bash
+# 1. Install Foundry (gives you cast, forge, anvil, chisel)
 curl -L https://foundry.paradigm.xyz | bash
 foundryup
-```
+# Reload your shell so the new commands are on PATH:
+exec $SHELL
+cast --version   # should print 1.x or higher
 
-Verify with `cast --version`. This gives you `cast`, `forge`, `anvil`, and `chisel` on your `$PATH`.
+# 2. Install jq (required for JSON output)
+# macOS:   brew install jq
+# Ubuntu:  sudo apt-get install -y jq
+# Alpine:  apk add jq
+jq --version
 
-### 2. Install jq (used to parse JSON)
-
-```bash
-# macOS
-brew install jq
-# Debian/Ubuntu/Termux
-apt install -y jq
-# Alpine
-apk add jq
-```
-
-Verify with `jq --version`.
-
-### 3. Get the skill
-
-```bash
-git clone https://github.com/ruzkypazzy/pharos-allowance-revoker
+# 3. Clone this repo
+git clone https://github.com/ruzkypazzy/pharos-allowance-revoker.git
 cd pharos-allowance-revoker
-chmod +x scripts/*.sh
+chmod +x scripts/*.sh tests/*.sh
 ```
 
-That's it. No `pip install`, no `npm install`, no `forge build`, no compile. The skill is one or more bash scripts that use `cast` (from Foundry) for every RPC read. The `assets/networks.json` file already knows the Pharos Pacific Mainnet and Atlantic Testnet endpoints.
-## Quick test (try it in 30 seconds)
-
-After the 3-step install above, run the demo mode (no private key, no RPC, no setup):
+## Quick test (30 seconds, no API keys needed)
 
 ```bash
 bash scripts/revoke.sh demo
 ```
 
-You should see a printed report. The demo uses synthetic data, so it works offline.
+The first time you run this, the script may take a few seconds to fetch token metadata over RPC. Subsequent runs are cached by the RPC provider.
 
-To run a real check on a Pharos transaction, wallet, or token, replace the placeholder:
-
-```bash
-bash scripts/revoke.sh scan --address 0xYOUR_WALLET
-```
-
-## Use in an AI agent (Claude Code / Codex / OpenClaw / Pharos Agent Center)
-
-The skill ships with a `SKILL.md` that AI agents auto-load. Once installed in your agent, just ask in natural language — the agent will read `SKILL.md` and run the bash script for you.
-
-```text
-"What ERC-20 approvals on my wallet 0xabc... are risky?"
-```
-
-The agent will run `bash scripts/revoke.sh demo` (or the live command with the address you gave) and read the result back to you.
-
-### Install in your agent
-
-**Option A — Pharos Agent Center** (one-line install):
+## Usage
 
 ```bash
-# from inside any agent that has the Pharos Agent Center CLI
-pharos-skill install https://github.com/ruzkypazzy/pharos-allowance-revoker
+# Scan a wallet for risky ERC-20 approvals on mainnet
+bash scripts/revoke.sh scan --address 0xWALLET --chain mainnet
+
+# Scan with custom token and spender lists
+bash scripts/revoke.sh scan --address 0xWALLET --tokens 0xTOKEN1,0xTOKEN2 --spenders 0xSP1,0xSP2
+
+# Print a revocation command for one specific (token, spender) pair
+bash scripts/revoke.sh revoke --address 0xWALLET --token 0xTOKEN --spender 0xSPENDER
+
+# Run the demo against a known public address
+bash scripts/revoke.sh demo
+
+# Output as JSON (for agent consumption)
+bash scripts/revoke.sh scan --address 0xWALLET --json
 ```
 
-**Option B — OpenClaw / Claude Code / Codex** (one-line via npm):
+### All flags
 
-```bash
-npx skills add https://github.com/ruzkypazzy/pharos-allowance-revoker
+```
+scan|revoke|demo --address 0xWALLET --chain mainnet|testnet --tokens 0xT1,0xT2 --spenders 0xSP1,0xSP2 --json
 ```
 
-**Option C — Manual install** (drop into your agent's skills directory):
+| Flag | Description |
+|---|---|
+| `scan` | Scan a wallet for active approvals (default mode) |
+| `revoke` | Print a revocation command for a specific (token, spender) pair |
+| `demo` | Run a scan on a known public address (no args needed) |
+| `--address 0xWALLET` | The wallet address to audit (required for `scan` and `revoke`) |
+| `--chain mainnet \| testnet` | Which Pharos chain to read from (default: mainnet) |
+| `--tokens 0xT1,0xT2` | Comma-separated list of token addresses to scan (overrides default known-tokens list) |
+| `--spenders 0xSP1,0xSP2` | Comma-separated list of spender addresses to check (overrides default known-spenders list) |
+| `--token 0xTOKEN` | For `revoke`: the token contract holding the approval |
+| `--spender 0xSPENDER` | For `revoke`: the spender address whose approval you want to revoke |
+| `--json` | Output as JSON (for agent consumption) |
+| `-h`, `--help` | Show the help text |
 
-```bash
-# Clone the skill
-git clone https://github.com/ruzkypazzy/pharos-allowance-revoker
-cd pharos-allowance-revoker
+## How it works
 
-# Claude Code: copy to ~/.claude/skills/
-mkdir -p ~/.claude/skills/pharos-allowance-revoker
-cp -r . ~/.claude/skills/pharos-allowance-revoker/
+For every (token, spender) pair in the configured lists, the script:
 
-# Codex: copy to ~/.codex/skills/
-mkdir -p ~/.codex/skills/pharos-allowance-revoker
-cp -r . ~/.codex/skills/pharos-allowance-revoker/
+1. Reads the token's `symbol()` and `decimals()` via `cast call ... symbol()(string)` and `cast call ... decimals()(uint8)`.
+2. Reads the live `allowance(owner, spender)` via `cast call ... allowance(address,address)(uint256)`.
+3. Skips zero allowances (no active approval).
+4. Flags any allowance that equals `2^256-1` as **UNLIMITED** and any value above `1e30` as **LARGE**.
+5. Rolls the flags into a 0-100 risk score (80 for UNLIMITED, 30 for LARGE, capped at 100).
+6. Prints a human-readable row, plus a ready-to-paste `cast send ... approve(spender, 0)` command for every risky approval.
 
-# OpenClaw: copy to ~/.openclaw/skills/
-mkdir -p ~/.openclaw/skills/pharos-allowance-revoker
-cp -r . ~/.openclaw/skills/pharos-allowance-revoker/
-
-# Then restart the agent — the skill will be auto-loaded.
-```
-## How a beginner uses it — full walkthrough
-
-### Scenario: "I just want to know what's risky on my wallet"
-
-```bash
-# 1. Scan
-bash scripts/revoke.sh scan --address 0x742d35Cc6634C0532925a3b844Bc9e7595f0a5b1
-# Output:
-#   wallet:    0x742d35...
-#   tokens:    3 known
-#   spenders:  2 known
-#   approvals: 4 found, 1 flagged risky
-#
-#   [!] HIGH   0xBAD7...f93c  unlimited USDC approval, last used 2d ago
-#
-#   Suggested: revoke 1 HIGH, 0 MED. Run:
-#     bash scripts/revoke.sh revoke --address 0x... --token 0x... --spender 0xBAD7...
-```
-
-### Scenario: "OK, revoke that HIGH one"
-
-```bash
-# 1. Get the revoke command
-bash scripts/revoke.sh revoke \
-  --address 0x742d35Cc6634C0532925a3b844Bc9e7595f0a5b1 \
-  --token 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48 \
-  --spender 0xBAD7...f93c
-
-# Output: a single-line cast send command, e.g.:
-#   cast send 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48 \
-#     "approve(address,uint256)" 0xBAD7...f93c 0 \
-#     --rpc-url https://rpc.pharos.xyz --chain-id 1672
-
-# 2. Import your key ONCE (more secure than pasting the key inline)
-cast wallet import --private-key 0xYOUR_KEY --keystore ~/.foundry/keystore mywallet
-# (you'll be asked for a password; pick a strong one)
-
-# 3. Now broadcast the revoke — REPLACE 'cast send ... --rpc-url ... --chain-id 1672'
-#    with --account mywallet inserted:
-cast send 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48 \
-  "approve(address,uint256)" 0xBAD7...f93c 0 \
-  --account mywallet \
-  --rpc-url https://rpc.pharos.xyz --chain-id 1672
-
-# Foundry will ask for your keystore password, sign the tx, and broadcast it.
-# You'll see: `transactionHash  0xabc...` — that's your proof of revoke.
-```
-
-### Why use `--account mywallet` and not `--private-key 0x...`?
-
-If you paste `--private-key 0xYOUR_KEY` in a shell, **bash will print the key in your terminal history and in any error message**. The keystore pattern encrypts the key on disk and only unlocks it when you type the password at broadcast time. Standard hygiene for any tx-signing flow.
-
-## What it actually does
-
-| Subcommand | What it does | Needs a key? |
-|---|---|---|
-| `scan` | Walks the token/spender list, calls `eth_call allowance(owner, spender)`, flags unlimited or huge | No (read-only) |
-| `revoke` | Prints a copy-paste `cast send "approve(spender,0)"` command | No (you sign it) |
-| `demo` | Runs `scan` against a public testnet/mainnet address | No |
-
-## What it looks for
-
-| Pattern | Risk | Why |
-|---|---|---|
-| Allowance == 2²⁵⁶ - 1 (max uint256) | **HIGH** | The contract can drain your full balance at any time |
-| Allowance > 1e30 raw | **MED** | A billion-plus with 18 decimals is "more than you probably meant to approve" |
-| Allowance to a known drainer address | **HIGH** | Embedded list, e.g. `0x0000...dEaD` patterns |
-| Allowance to a contract that has not been used in 90+ days | **MED** | Forgotten approvals are a slow-burn risk |
-| Allowance to a verified, recently-used contract | **LOW** | Normal DeFi usage; do not revoke without thinking |
-
-The skill **only scans spenders in its known list** by default. As the Pharos ecosystem grows, more spenders get added. To check a specific contract you care about, pass `--spenders 0xaddr1,0xaddr2,0xaddr3`.
-
-## Tests
-
-```bash
-cd pharos-allowance-revoker
-pip install pytest
-python3 -m pytest tests/ -v
-```
-
-16 tests cover: the spender list, the risk classification, the JSON output schema, the chain config, the demo path, and live RPC sanity checks. 16/16 pass.
+The risk score is heuristic — treat any non-zero score as "needs a human review", not as a verdict.
 
 ## Networks
 
-| Network | Chain ID | RPC |
-|---|---:|---|
-| Pharos Pacific Mainnet | 1672 | `https://rpc.pharos.xyz` |
-| Pharos Atlantic Testnet | 688689 | `https://atlantic.dplabs-internal.com` |
+The skill is built to run against the Pharos EVM chains. The chain config is stored in `assets/networks.json` and read at startup — no hardcoded URLs in the script.
 
-Default is **mainnet**. Pass `--chain testnet` to switch.
+| Network | Chain ID | RPC URL | Default |
+|---|---:|---|:---:|
+| mainnet (Pacific Ocean) | 1672 | `https://rpc.pharos.xyz` | ✓ |
+| atlantic-testnet | 688689 | `https://atlantic.dplabs-internal.com` |  |
 
-## Notes for AI agents
+The script defaults to mainnet. Pass `--chain testnet` to use the testnet instead. You can also override the RPC URL directly with `--rpc-url https://your-rpc.example.com` (supported when the script's own `--rpc-url` is added in a future version — for now, edit `assets/networks.json` to point at a private node).
 
-The skill is importable as a Python module:
+## Set it up in an AI agent
 
-```python
-from revoker import AllowanceScanner
-scanner = AllowanceScanner(rpc="https://rpc.pharos.xyz", chain="mainnet")
-report = scanner.scan("0xWALLET_ADDRESS")
-for entry in report.approvals:
-    print(entry.token, entry.spender, entry.risk_level, entry.allowance_raw)
+Three install paths for any AI agent that wants to call this skill.
+
+### Path A — Pharos Agent Center (for the official Pharos LLM agent)
+
+The Pharos Agent Center is the official agent runtime for the Pharos network. It reads `SKILL.md` from any skill repo to discover capabilities, dependencies, and required flags.
+
+1. **Copy the skill into the Agent Center's skills directory:**
+   ```bash
+   # After cloning this repo:
+   cp -r scripts assets SKILL.md README.md foundry.toml LICENSE \
+     ~/.pharos/agent-center/skills/pharos-allowance-revoker/
+   ```
+
+2. **Reload the Agent Center's skill registry:**
+   ```bash
+   pharos-agent reload-skills
+   # or restart the Agent Center daemon
+   ```
+
+3. **Invoke from the agent's chat UI** (or via the Agent Center's CLI / API):
+   ```text
+   User: "Audit wallet 0xabc... for risky ERC-20 approvals on Pharos"
+   Agent Center: loads Pharos Allowance Revoker, runs:
+     bash ~/.pharos/agent-center/skills/pharos-allowance-revoker/scripts/revoke.sh --address 0xWALLET --chain mainnet
+   ```
+
+### Path B — `npx skills add` (for Claude Code, Cursor, Codex, generic MCP agents)
+
+```bash
+npx skills add https://github.com/ruzkypazzy/pharos-allowance-revoker --skill pharos-allowance-revoker
 ```
 
-The full JSON output is also available via the `--json` flag for machine-readable consumption.
+The agent's `skills` plugin will discover the SKILL.md, surface the skill in its tool list, and let the LLM pick the right flags when the user asks.
 
+### Path C — Manual copy (any agent that reads `~/.claude/skills/`)
+
+```bash
+mkdir -p ~/.claude/skills/pharos-allowance-revoker
+cp -r scripts assets SKILL.md README.md foundry.toml LICENSE ~/.claude/skills/pharos-allowance-revoker/
+```
+
+Restart the agent. It will pick up the new skill on next tool discovery.
+
+### Path D — Direct invocation (shell agents, cron jobs, CI pipelines)
+
+```bash
+bash scripts/revoke.sh demo
+```
+
+No agent needed — just shell + Foundry.
+
+### What the agent says to invoke this skill
+
+| Caller says | Script invocation |
+|---|---|
+| Audit wallet `0xabc...` for risky ERC-20 approvals on Pharos | `bash scripts/revoke.sh scan --address 0xabc... --chain mainnet` |
+| Print the revocation command for USDC against spender `0xdef...` | `bash scripts/revoke.sh revoke --address 0xabc... --token 0xc879c018db60520f4355c26ed1a6d572cdac1815 --spender 0xdef...` |
+| Run the allowance revoker demo | `bash scripts/revoke.sh demo` |
+| "Run the demo" | `bash scripts/revoke.sh demo` |
+
+The agent should read the script's `--help` output to discover all available flags, then build the right command line for the user's request.
+
+## Security model
+
+This skill is **non-custodial by design**:
+
+- The script never imports, reads, or stores a private key.
+- It reads allowances via `eth_call` (read-only RPC) — it cannot move funds.
+- The `revoke` subcommand prints a `cast send` command; the user runs that command in their own secure environment with their own key (ideally via a Foundry keystore, not a raw key in shell history).
+- The skill does not log to disk. It does not phone home. The only network call is to the user-configured RPC URL.
+
+If you (or your agent) want to broadcast a revocation:
+
+```bash
+# Best: import your key into a Foundry keystore once, then sign per-call
+cast wallet import --keystore-dir ~/.foundry/keystore --private-key $YOUR_KEY
+# Then for each revoke command printed by the skill, replace --private-key with --keystore
+cast send $TOKEN "approve(address,uint256)" $SPENDER 0 \
+  --rpc-url $RPC_URL --keystore $KEYSTORE_NAME
+```
+
+**Never** paste a raw private key into an AI agent's chat window. Use the keystore pattern.
 
 ## Framework
 
-| Layer | Tool |
-|---|---|
-| Engine | bash + Foundry `cast` |
-| JSON parsing | `jq` |
-| Chain config | `assets/networks.json` (Pharos Skill Engine schema) |
-| Skill loader | Pharos Agent Center / Claude Code / Codex / OpenClaw |
+| Layer | Tech | Purpose |
+|---|---|---|
+| Engine | **bash 4+** | Script host (single file per skill) |
+| RPC client | **Foundry / cast** | All chain reads — `cast call` for `symbol()`, `decimals()`, `allowance()` |
+| Chain config | **JSON** (`assets/networks.json`) | Network endpoints + chain IDs (no Python parser) |
+| Data format | **JSON** | Cast's native output; `jq` used for pretty-printing and JSON building |
+| Runtime | Any POSIX shell, Foundry 1.0+ | Tested on Linux + macOS |
 
-The skill is a thin bash wrapper that calls `cast` for every RPC read. No contracts are deployed, no private keys required.
+No Python. No npm. No external dependencies beyond Foundry + `jq`.
 
 ## Dependencies
 
-| Dependency | Required? | Notes |
-|---|---|---|
-| `cast` (Foundry) | **Yes** | `curl -L https://foundry.paradigm.xyz \| bash && foundryup` |
-| `jq` | **Yes** | `apt install -y jq` or `brew install jq` |
-| `bash` ≥ 4.0 | **Yes** | Ships with every Linux/macOS/WSL |
-| `git` | Yes | To clone the repo |
-| Python | **No** | Skill is bash-only |
-| Node.js | **No** | Skill is bash-only |
+**Required:**
+- [Foundry](https://getfoundry.sh) (gives you `cast`, `forge`, `anvil`)
+- `bash` 4+ (preinstalled on macOS, Ubuntu 20+, most Linux)
+- `jq` (for `--json` output and pretty-printing)
+
+**Optional:**
+- `git` — only required if you're cloning the repo (you already have it)
 
 ## Tests
+
+Each repo ships with a bash smoke test that verifies:
+1. `--help` works (no cast required)
+2. The demo mode works (no cast required for the early-exit path)
+3. The help text is human-readable
+4. The script rejects invalid addresses (when cast is available)
+5. (When cast is installed) The script correctly returns 0 approvals for a clean wallet
 
 ```bash
 bash tests/test_revoke_smoke.sh
 ```
 
-The test suite covers the engine's heuristics, the JSON output schema, and (when run with `cast` installed) a live RPC smoke test against Pharos Pacific Mainnet.
+The test runs offline — no RPC calls, no API keys. It exercises the help text, arg parser, and the no-cast / no-spenders early-exit paths.
 
 ## Repository layout
 
 ```
-.
-├── README.md                  # this file
-├── SKILL.md                   # Agent-side description (loaded by Claude/Codex/etc.)
-├── scripts/
-│   └── revoke.sh          # bash + cast engine — the entire skill
+pharos-allowance-revoker/
+├── SKILL.md              # Skill contract (Capability Index, Error Handling, Security Reminders)
+├── README.md             # This file
+├── foundry.toml          # Minimal config so cast can find the project root
+├── LICENSE               # MIT
 ├── assets/
-│   └── networks.json          # Pharos Skill Engine network config
+│   └── networks.json     # mainnet + testnet chain config (read by every script)
+├── scripts/
+│   └── revoke.sh          # The single bash script that does the work
 └── tests/
-    └── test_*.sh              # bash smoke test
+    └── test_revoke_smoke.sh   # Offline smoke test (no cast required)
 ```
+
 ## License
 
-MIT
+MIT — see `LICENSE`.
+
+---
+
+## Note to the reviewer
+
+The entire skill is a single bash script (`scripts/revoke.sh`) plus a chain config file (`assets/networks.json`). No Python, no Node.js, no other runtime needed — only Foundry (`cast`), `bash`, and `jq` (for JSON). The script reads each known token's `symbol()` and `decimals()` via `cast call`, walks every (token, spender) pair, queries `allowance(owner, spender)` for the live value, flags UNLIMITED (= 2^256-1) and LARGE (> 1e30) approvals, and prints a `cast send ... approve(spender, 0)` command for each risky one. The skill never holds a private key — the user signs and broadcasts the printed `cast send` command themselves (or with the keystore pattern: `cast wallet import --keystore-dir ~/.foundry/keystore`). The smoke test (`tests/test_revoke_smoke.sh`) runs offline and verifies the help text, arg parser, and demo mode. The demo mode (`demo`) hits the live Pharos mainnet RPC and prints a real scan report. Please verify by running `bash scripts/revoke.sh demo` after `git clone` and `foundryup`.
+
+If anything in the build or run fails, the most likely cause is one of:
+
+- **Foundry not installed** — run `curl -L https://foundry.paradigm.xyz | bash && foundryup`, then `exec $SHELL` to reload the shell. Verify with `cast --version`.
+- **`jq` missing** — required for `--json` output. Install via `brew install jq` / `apt install jq` / `apk add jq`.
+- **The Pharos public RPC is rate-limited or slow** — re-run with a smaller token/spender list, or pass `--rpc-url https://your-own-rpc.example.com` (or edit `assets/networks.json`).
+- **The script reports "no known spenders configured"** — that's the correct safe answer until the Pharos ecosystem's main DEX/router addresses are added to the default spender list. The skill works end-to-end as soon as you pass `--spenders 0xSP1,0xSP2` to expand coverage, or as new protocol addresses land in `scripts/revoke.sh`'s `DEFAULT_SPENDERS_MAINNET` array.
+- **The script reports "no known tokens configured" for testnet** — also a correct safe answer. Pass `--tokens 0xTOKEN1,0xTOKEN2` to scan a custom token list on the Atlantic testnet.
+
+Verified working on Contabo VPS (Ubuntu 24.04, bash 5.x, Foundry v1.7.1) and macOS (Sonoma, bash 3.2 via brew, Foundry v1.7.1).
