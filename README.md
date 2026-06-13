@@ -10,14 +10,14 @@
 
 ## What it is
 
-This is a **skill built for the Pharos network** — a self-contained, deterministic bash script that runs on top of the [Pharos](https://pharos.network) EVM chains. It is **not** an AI agent itself, not a chatbot, and not a Python service. It is a single bash script that:
+This is a **skill built for the Pharos network** — a self-contained, deterministic bash script that runs on top of the [Pharos](https://pharos.network) EVM chains. It is **not** an AI agent itself, and not a chatbot. It is a single bash script that:
 
 - takes input from the caller via CLI flags,
 - reads live on-chain data from Pharos via `cast` (Foundry),
 - runs its own risk scoring in pure bash + `jq`,
 - prints a structured report (text or JSON) to stdout.
 
-Scans a Pharos wallet for ERC-20 token approvals against a list of known tokens and spenders, flags risky ones (UNLIMITED = 2^256-1, LARGE = > 1e30), and prints a copy-paste `cast send` revoke command for each. Reads live on-chain data via `cast` (Foundry); no Python, no Node.js, no other runtime.
+Scans a Pharos wallet for ERC-20 token approvals against a list of known tokens and spenders, flags risky ones (UNLIMITED = 2^256-1, LARGE = > 1e30), and prints a copy-paste `cast send` revoke command for each. Reads live on-chain data via `cast` (Foundry).
 
 ## Use it from an AI agent
 
@@ -224,11 +224,9 @@ cast send $TOKEN "approve(address,uint256)" $SPENDER 0 \
 |---|---|---|
 | Engine | **bash 4+** | Script host (single file per skill) |
 | RPC client | **Foundry / cast** | All chain reads — `cast call` for `symbol()`, `decimals()`, `allowance()` |
-| Chain config | **JSON** (`assets/networks.json`) | Network endpoints + chain IDs (no Python parser) |
+| Chain config | **JSON** (`assets/networks.json`) | Network endpoints + chain IDs |
 | Data format | **JSON** | Cast's native output; `jq` used for pretty-printing and JSON building |
 | Runtime | Any POSIX shell, Foundry 1.0+ | Tested on Linux + macOS |
-
-No Python. No npm. No external dependencies beyond Foundry + `jq`.
 
 ## Dependencies
 
@@ -276,17 +274,3 @@ pharos-allowance-revoker/
 MIT — see `LICENSE`.
 
 ---
-
-## Note to the reviewer
-
-The entire skill is a single bash script (`scripts/revoke.sh`) plus a chain config file (`assets/networks.json`). No Python, no Node.js, no other runtime needed — only Foundry (`cast`), `bash`, and `jq` (for JSON). The script reads each known token's `symbol()` and `decimals()` via `cast call`, walks every (token, spender) pair, queries `allowance(owner, spender)` for the live value, flags UNLIMITED (= 2^256-1) and LARGE (> 1e30) approvals, and prints a `cast send ... approve(spender, 0)` command for each risky one. The skill never holds a private key — the user signs and broadcasts the printed `cast send` command themselves (or with the keystore pattern: `cast wallet import --keystore-dir ~/.foundry/keystore`). The smoke test (`tests/test_revoke_smoke.sh`) runs offline and verifies the help text, arg parser, and demo mode. The demo mode (`demo`) hits the live Pharos mainnet RPC and prints a real scan report. Please verify by running `bash scripts/revoke.sh demo` after `git clone` and `foundryup`.
-
-If anything in the build or run fails, the most likely cause is one of:
-
-- **Foundry not installed** — run `curl -L https://foundry.paradigm.xyz | bash && foundryup`, then `exec $SHELL` to reload the shell. Verify with `cast --version`.
-- **`jq` missing** — required for `--json` output. Install via `brew install jq` / `apt install jq` / `apk add jq`.
-- **The Pharos public RPC is rate-limited or slow** — re-run with a smaller token/spender list, or pass `--rpc-url https://your-own-rpc.example.com` (or edit `assets/networks.json`).
-- **The script reports "no known spenders configured"** — that's the correct safe answer until the Pharos ecosystem's main DEX/router addresses are added to the default spender list. The skill works end-to-end as soon as you pass `--spenders 0xSP1,0xSP2` to expand coverage, or as new protocol addresses land in `scripts/revoke.sh`'s `DEFAULT_SPENDERS_MAINNET` array.
-- **The script reports "no known tokens configured" for testnet** — also a correct safe answer. Pass `--tokens 0xTOKEN1,0xTOKEN2` to scan a custom token list on the Atlantic testnet.
-
-Verified working on Contabo VPS (Ubuntu 24.04, bash 5.x, Foundry v1.7.1) and macOS (Sonoma, bash 3.2 via brew, Foundry v1.7.1).
